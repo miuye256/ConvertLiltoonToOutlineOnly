@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VRC.SDK3.Avatars.Components;
+using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace LzebulOutlineOnly
 {
@@ -51,7 +54,7 @@ namespace LzebulOutlineOnly
                 EditorGUIUtility.PingObject(result.Prefab);
                 EditorUtility.DisplayDialog(
                     "Lzebul Outline",
-                    $"アウトライン用Prefabを作成しました。\n\n{prefabPath}\n\n変換Renderer: {result.RendererCount}\n生成Material: {result.MaterialCount}\nDepth Proxy: {result.DepthProxyCount}",
+                    $"アウトライン用Prefabを作成しました。\n\n{prefabPath}\n\n変換Renderer: {result.RendererCount}\n生成Material: {result.MaterialCount}\nDepth Proxy: {result.DepthProxyCount}\nExpressionMenu: {(result.ExpressionInstalled ? "追加済み" : "未追加")}",
                     "OK");
             }
             catch (Exception exception)
@@ -80,7 +83,13 @@ namespace LzebulOutlineOnly
         internal const string OutputRoot = "Assets/LzebulOutlineOnly/Generated";
         internal const string MaterialsFolder = OutputRoot + "/Materials";
         internal const string DepthMaterialsFolder = OutputRoot + "/DepthMaterials";
+        internal const string ExpressionsFolder = OutputRoot + "/Expressions";
         internal const string DepthProxyPrefix = "__OutlineDepthProxy_";
+        internal const string ExpressionPrefix = "LOO_";
+        internal const string ParamColorR = ExpressionPrefix + "ColorR";
+        internal const string ParamColorG = ExpressionPrefix + "ColorG";
+        internal const string ParamColorB = ExpressionPrefix + "ColorB";
+        internal const string ExpressionLayerPrefix = "LOO Color ";
         internal const float DefaultOutlineWidth = 0.08f;
         internal const float HairOutlineOffsetFactor = -1f;
         internal const float HairOutlineOffsetUnits = -1f;
@@ -88,29 +97,33 @@ namespace LzebulOutlineOnly
 
     internal sealed class OutlineOnlyConversionResult
     {
-        internal OutlineOnlyConversionResult(GameObject prefab, int rendererCount, int materialCount, int depthProxyCount)
+        internal OutlineOnlyConversionResult(GameObject prefab, int rendererCount, int materialCount, int depthProxyCount, bool expressionInstalled)
         {
             Prefab = prefab;
             RendererCount = rendererCount;
             MaterialCount = materialCount;
             DepthProxyCount = depthProxyCount;
+            ExpressionInstalled = expressionInstalled;
         }
 
         internal GameObject Prefab { get; }
         internal int RendererCount { get; }
         internal int MaterialCount { get; }
         internal int DepthProxyCount { get; }
+        internal bool ExpressionInstalled { get; }
     }
 
     internal sealed class OutlineOnlyAvatarBuilder
     {
         private readonly OutlineOnlyMaterialConverter materialConverter;
         private readonly DepthProxyBuilder depthProxyBuilder;
+        private readonly OutlineOnlyExpressionColorInstaller expressionColorInstaller;
 
         internal OutlineOnlyAvatarBuilder(Shader outlineShader, Shader depthShader)
         {
             materialConverter = new OutlineOnlyMaterialConverter(outlineShader);
             depthProxyBuilder = new DepthProxyBuilder(depthShader);
+            expressionColorInstaller = new OutlineOnlyExpressionColorInstaller();
         }
 
         internal OutlineOnlyConversionResult Create(GameObject source)
@@ -130,11 +143,12 @@ namespace LzebulOutlineOnly
                 var depthProxyCount = depthProxyBuilder.AddOrUpdateDepthProxies(instance);
 
                 var prefabPath = $"{OutlineOnlyConstants.OutputRoot}/{OutlineOnlyAssetPaths.SanitizeFileName(instance.name)}.prefab";
+                var expressionInstalled = expressionColorInstaller.Install(instance, prefabPath);
                 var prefab = PrefabUtility.SaveAsPrefabAsset(instance, prefabPath);
 
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
-                return new OutlineOnlyConversionResult(prefab, rendererCount, materialConverter.CreatedMaterialCount, depthProxyCount);
+                return new OutlineOnlyConversionResult(prefab, rendererCount, materialConverter.CreatedMaterialCount, depthProxyCount, expressionInstalled);
             }
             finally
             {
@@ -516,6 +530,388 @@ namespace LzebulOutlineOnly
             MaterialPropertyUtility.CopyFloat(sourceMaterial, depthMaterial, "_AlphaMaskScale", 1f);
             MaterialPropertyUtility.CopyFloat(sourceMaterial, depthMaterial, "_AlphaMaskValue", 0f);
             depthMaterial.renderQueue = -1;
+        }
+    }
+
+    internal sealed class OutlineOnlyExpressionColorInstaller
+    {
+        private const string RootMenuAssetName = "RootMenu.asset";
+        private const string ColorMenuAssetName = "OutlineColorMenu.asset";
+        private const string ParametersAssetName = "ExpressionParameters.asset";
+        private const string FxControllerAssetName = "OutlineFX.controller";
+
+        private static readonly ColorChannel[] ColorChannels =
+        {
+            new ColorChannel("R", OutlineOnlyConstants.ParamColorR, "r"),
+            new ColorChannel("G", OutlineOnlyConstants.ParamColorG, "g"),
+            new ColorChannel("B", OutlineOnlyConstants.ParamColorB, "b")
+        };
+
+        internal bool Install(GameObject root, string prefabPath)
+        {
+            var avatar = root.GetComponent<VRCAvatarDescriptor>();
+            if (avatar == null)
+            {
+                return false;
+            }
+
+            var colorBindings = CollectColorBindings(root);
+            if (colorBindings.Count == 0)
+            {
+                Debug.LogWarning("Lzebul Outline: ExpressionMenu用の色変更対象Rendererが見つからなかったため、Expression追加をスキップしました。");
+                return false;
+            }
+
+            var assetFolder = GetExpressionAssetFolder(prefabPath);
+            OutlineOnlyAssetPaths.EnsureFolder(assetFolder);
+
+            var expressionParameters = CreateExpressionParameters($"{assetFolder}/{ParametersAssetName}");
+            var colorMenu = CreateColorMenu($"{assetFolder}/{ColorMenuAssetName}");
+            var rootMenu = CreateRootMenu(colorMenu, $"{assetFolder}/{RootMenuAssetName}");
+            var fxController = CreateFxController(colorBindings, assetFolder);
+
+            avatar.customExpressions = true;
+            avatar.expressionParameters = expressionParameters;
+            avatar.expressionsMenu = rootMenu;
+            AssignFxController(avatar, fxController);
+
+            EditorUtility.SetDirty(avatar);
+            return true;
+        }
+
+        private static List<RendererColorBinding> CollectColorBindings(GameObject root)
+        {
+            var bindings = new List<RendererColorBinding>();
+            foreach (var renderer in root.GetComponentsInChildren<Renderer>(true))
+            {
+                if (renderer == null || DepthProxyBuilder.IsDepthProxy(renderer.transform))
+                {
+                    continue;
+                }
+
+                if (!UsesOutlineOnlyMaterial(renderer))
+                {
+                    continue;
+                }
+
+                bindings.Add(new RendererColorBinding(
+                    AnimationUtility.CalculateTransformPath(renderer.transform, root.transform),
+                    renderer.GetType()));
+            }
+
+            return bindings;
+        }
+
+        private static bool UsesOutlineOnlyMaterial(Renderer renderer)
+        {
+            var materials = renderer.sharedMaterials;
+            for (var index = 0; index < materials.Length; index++)
+            {
+                var material = materials[index];
+                if (material != null && material.shader != null && material.shader.name == OutlineOnlyConstants.OutlineShaderName)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static VRCExpressionParameters CreateExpressionParameters(string assetPath)
+        {
+            OutlineOnlyAssetPaths.DeleteAssetIfExists(assetPath);
+
+            var parameters = ScriptableObject.CreateInstance<VRCExpressionParameters>();
+            parameters.name = "Lzebul Outline Parameters";
+            parameters.parameters = Array.Empty<VRCExpressionParameters.Parameter>();
+            UpsertColorParameters(parameters, true);
+
+            if (parameters.CalcTotalCost() > VRCExpressionParameters.MAX_PARAMETER_COST)
+            {
+                UpsertColorParameters(parameters, false);
+                Debug.LogWarning("Lzebul Outline: ExpressionParametersの同期容量を超えるため、アウトライン色パラメータは非同期で追加しました。自分の画面では変更できますが、他ユーザーには同期されません。");
+            }
+
+            AssetDatabase.CreateAsset(parameters, assetPath);
+            EditorUtility.SetDirty(parameters);
+            return parameters;
+        }
+
+        private static void UpsertColorParameters(VRCExpressionParameters parameters, bool networkSynced)
+        {
+            var list = new List<VRCExpressionParameters.Parameter>();
+            if (parameters.parameters != null)
+            {
+                for (var index = 0; index < parameters.parameters.Length; index++)
+                {
+                    var parameter = parameters.parameters[index];
+                    if (parameter != null && !IsOutlineColorParameter(parameter.name))
+                    {
+                        list.Add(parameter);
+                    }
+                }
+            }
+
+            for (var index = 0; index < ColorChannels.Length; index++)
+            {
+                list.Add(new VRCExpressionParameters.Parameter
+                {
+                    name = ColorChannels[index].ParameterName,
+                    valueType = VRCExpressionParameters.ValueType.Float,
+                    defaultValue = 0f,
+                    saved = true,
+                    networkSynced = networkSynced
+                });
+            }
+
+            parameters.parameters = list.ToArray();
+        }
+
+        private static VRCExpressionsMenu CreateColorMenu(string assetPath)
+        {
+            var menu = CreateAsset<VRCExpressionsMenu>(assetPath, "Lzebul Outline Color Menu");
+            ResetMenuControls(menu);
+
+            for (var index = 0; index < ColorChannels.Length; index++)
+            {
+                var channel = ColorChannels[index];
+                menu.controls.Add(new VRCExpressionsMenu.Control
+                {
+                    name = channel.DisplayName,
+                    type = VRCExpressionsMenu.Control.ControlType.RadialPuppet,
+                    parameter = new VRCExpressionsMenu.Control.Parameter
+                    {
+                        name = string.Empty
+                    },
+                    value = 0f,
+                    subParameters = new[]
+                    {
+                        new VRCExpressionsMenu.Control.Parameter
+                        {
+                            name = channel.ParameterName
+                        }
+                    }
+                });
+            }
+
+            SaveMenuAsset(menu);
+            return menu;
+        }
+
+        private static VRCExpressionsMenu CreateRootMenu(VRCExpressionsMenu colorMenu, string assetPath)
+        {
+            var menu = CreateAsset<VRCExpressionsMenu>(assetPath, "Lzebul Outline Root Menu");
+            ResetMenuControls(menu);
+
+            menu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "アウトライン色",
+                type = VRCExpressionsMenu.Control.ControlType.SubMenu,
+                parameter = new VRCExpressionsMenu.Control.Parameter
+                {
+                    name = string.Empty
+                },
+                value = 1f,
+                subMenu = colorMenu
+            });
+
+            SaveMenuAsset(menu);
+            return menu;
+        }
+
+        private static void ResetMenuControls(VRCExpressionsMenu menu)
+        {
+            if (menu.controls == null)
+            {
+                menu.controls = new List<VRCExpressionsMenu.Control>();
+                return;
+            }
+
+            menu.controls.Clear();
+        }
+
+        private static void SaveMenuAsset(VRCExpressionsMenu menu)
+        {
+            EditorUtility.SetDirty(menu);
+            AssetDatabase.SaveAssetIfDirty(menu);
+        }
+
+        private static AnimatorController CreateFxController(List<RendererColorBinding> colorBindings, string assetFolder)
+        {
+            var controllerPath = $"{assetFolder}/{FxControllerAssetName}";
+            OutlineOnlyAssetPaths.DeleteAssetIfExists(controllerPath);
+            var controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
+
+            controller.layers = Array.Empty<AnimatorControllerLayer>();
+            EnsureAnimatorParameters(controller);
+
+            for (var index = 0; index < ColorChannels.Length; index++)
+            {
+                var channel = ColorChannels[index];
+                var clip = CreateColorClip(colorBindings, channel, $"{assetFolder}/Color_{channel.DisplayName}.anim");
+                AddColorLayer(controller, channel, clip);
+            }
+
+            EditorUtility.SetDirty(controller);
+            return controller;
+        }
+
+        private static void EnsureAnimatorParameters(AnimatorController controller)
+        {
+            for (var index = 0; index < ColorChannels.Length; index++)
+            {
+                controller.AddParameter(new AnimatorControllerParameter
+                {
+                    name = ColorChannels[index].ParameterName,
+                    type = AnimatorControllerParameterType.Float,
+                    defaultFloat = 0f
+                });
+            }
+        }
+
+        private static AnimationClip CreateColorClip(List<RendererColorBinding> colorBindings, ColorChannel channel, string assetPath)
+        {
+            OutlineOnlyAssetPaths.DeleteAssetIfExists(assetPath);
+
+            var clip = new AnimationClip
+            {
+                name = $"Lzebul Outline Color {channel.DisplayName}",
+                wrapMode = WrapMode.ClampForever
+            };
+
+            var curve = AnimationCurve.Linear(0f, 0f, 1f, 1f);
+            var opaqueCurve = new AnimationCurve(new Keyframe(0f, 1f), new Keyframe(1f, 1f));
+            for (var index = 0; index < colorBindings.Count; index++)
+            {
+                var binding = colorBindings[index];
+                SetMaterialColorCurve(clip, binding, "_OutlineColor", channel.CurveSuffix, curve);
+                SetMaterialColorCurve(clip, binding, "_OutlineColor", "a", opaqueCurve);
+                SetMaterialColorCurve(clip, binding, "_SurfaceLineColor", channel.CurveSuffix, curve);
+                SetMaterialColorCurve(clip, binding, "_SurfaceLineColor", "a", opaqueCurve);
+            }
+
+            AssetDatabase.CreateAsset(clip, assetPath);
+            EditorUtility.SetDirty(clip);
+            return clip;
+        }
+
+        private static void SetMaterialColorCurve(AnimationClip clip, RendererColorBinding target, string propertyName, string curveSuffix, AnimationCurve curve)
+        {
+            AnimationUtility.SetEditorCurve(
+                clip,
+                new EditorCurveBinding
+                {
+                    path = target.Path,
+                    type = target.RendererType,
+                    propertyName = $"material.{propertyName}.{curveSuffix}"
+                },
+                curve);
+        }
+
+        private static void AddColorLayer(AnimatorController controller, ColorChannel channel, AnimationClip clip)
+        {
+            var stateMachine = new AnimatorStateMachine
+            {
+                name = OutlineOnlyConstants.ExpressionLayerPrefix + channel.DisplayName
+            };
+            AssetDatabase.AddObjectToAsset(stateMachine, controller);
+
+            var state = stateMachine.AddState("Value");
+            state.motion = clip;
+            state.writeDefaultValues = false;
+            state.speed = 0f;
+            state.timeParameterActive = true;
+            state.timeParameter = channel.ParameterName;
+            stateMachine.defaultState = state;
+
+            controller.AddLayer(new AnimatorControllerLayer
+            {
+                name = OutlineOnlyConstants.ExpressionLayerPrefix + channel.DisplayName,
+                defaultWeight = 1f,
+                blendingMode = AnimatorLayerBlendingMode.Override,
+                stateMachine = stateMachine
+            });
+        }
+
+        private static void AssignFxController(VRCAvatarDescriptor avatar, RuntimeAnimatorController controller)
+        {
+            var index = GetFxLayerIndex(avatar);
+            if (index < 0)
+            {
+                Debug.LogWarning("Lzebul Outline: FX Layerが見つからないため、アウトライン色のAnimatorを設定できませんでした。");
+                return;
+            }
+
+            var layer = avatar.baseAnimationLayers[index];
+            layer.isDefault = false;
+            layer.animatorController = controller;
+            avatar.baseAnimationLayers[index] = layer;
+        }
+
+        private static int GetFxLayerIndex(VRCAvatarDescriptor avatar)
+        {
+            if (avatar.baseAnimationLayers == null)
+            {
+                return -1;
+            }
+
+            for (var index = 0; index < avatar.baseAnimationLayers.Length; index++)
+            {
+                if (avatar.baseAnimationLayers[index].type == VRCAvatarDescriptor.AnimLayerType.FX)
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private static string GetExpressionAssetFolder(string prefabPath)
+        {
+            var prefabName = Path.GetFileNameWithoutExtension(prefabPath);
+            return $"{OutlineOnlyConstants.ExpressionsFolder}/{OutlineOnlyAssetPaths.SanitizeFileName(prefabName)}";
+        }
+
+        private static T CreateAsset<T>(string assetPath, string name) where T : ScriptableObject
+        {
+            OutlineOnlyAssetPaths.DeleteAssetIfExists(assetPath);
+            var asset = ScriptableObject.CreateInstance<T>();
+            asset.name = name;
+            AssetDatabase.CreateAsset(asset, assetPath);
+            return asset;
+        }
+
+        private static bool IsOutlineColorParameter(string parameterName)
+        {
+            return parameterName == OutlineOnlyConstants.ParamColorR
+                   || parameterName == OutlineOnlyConstants.ParamColorG
+                   || parameterName == OutlineOnlyConstants.ParamColorB;
+        }
+
+        private readonly struct RendererColorBinding
+        {
+            internal RendererColorBinding(string path, Type rendererType)
+            {
+                Path = path;
+                RendererType = rendererType;
+            }
+
+            internal string Path { get; }
+            internal Type RendererType { get; }
+        }
+
+        private readonly struct ColorChannel
+        {
+            internal ColorChannel(string displayName, string parameterName, string curveSuffix)
+            {
+                DisplayName = displayName;
+                ParameterName = parameterName;
+                CurveSuffix = curveSuffix;
+            }
+
+            internal string DisplayName { get; }
+            internal string ParameterName { get; }
+            internal string CurveSuffix { get; }
         }
     }
 
