@@ -90,6 +90,8 @@ Shader "Lzebul/VRChat/Outline Only"
         float _SurfaceLineThreshold;
         float _SurfaceLineSoftness;
         float _SurfaceLineInvert;
+        float _UseFutureChromaticAberration;
+        float _FutureChromaticAberrationStrength;
 
         struct basic_appdata
         {
@@ -187,6 +189,27 @@ Shader "Lzebul/VRChat/Outline Only"
             return output;
         }
 
+        float4 ApplyChromaticOffset(float4 clipPos, float sign)
+        {
+            float offset = saturate(_FutureChromaticAberrationStrength) * 0.006;
+            clipPos.xy += float2(sign * offset, 0.0) * clipPos.w;
+            return clipPos;
+        }
+
+        basic_v2f BasicVertChromaticPositive(basic_appdata input)
+        {
+            basic_v2f output = BasicVert(input);
+            output.pos = ApplyChromaticOffset(output.pos, 1.0);
+            return output;
+        }
+
+        basic_v2f BasicVertChromaticNegative(basic_appdata input)
+        {
+            basic_v2f output = BasicVert(input);
+            output.pos = ApplyChromaticOffset(output.pos, -1.0);
+            return output;
+        }
+
         fixed4 DepthFrag(basic_v2f input) : SV_Target
         {
             clip(_UseVisibleDepth - 0.5);
@@ -214,6 +237,35 @@ Shader "Lzebul/VRChat/Outline Only"
             float4 outputColor = _SurfaceLineColor;
             outputColor.a *= saturate(lineAlpha * _SurfaceLineOpacity);
             return outputColor;
+        }
+
+        void ClipChromaticAberration()
+        {
+            clip(_UseFutureChromaticAberration - 0.5);
+            clip(_FutureChromaticAberrationStrength - 0.001);
+        }
+
+        float4 SurfaceLineChromaticFrag(basic_v2f input, float3 chromaticColor)
+        {
+            ClipChromaticAberration();
+            clip(_UseSurfaceLines - 0.5);
+            ClipOutlineAlpha(input.uv);
+
+            float lineAlpha = GetSurfaceLineCoverage(input.uv);
+            clip(lineAlpha - 0.001);
+
+            float alpha = saturate(lineAlpha * _SurfaceLineOpacity * _SurfaceLineColor.a * _FutureChromaticAberrationStrength);
+            return float4(chromaticColor, alpha);
+        }
+
+        float4 SurfaceLineChromaticRedFrag(basic_v2f input) : SV_Target
+        {
+            return SurfaceLineChromaticFrag(input, float3(1.0, 0.0, 0.0));
+        }
+
+        float4 SurfaceLineChromaticCyanFrag(basic_v2f input) : SV_Target
+        {
+            return SurfaceLineChromaticFrag(input, float3(0.0, 0.85, 1.0));
         }
 
         float3 GetOutlineNormalOS(outline_appdata input)
@@ -275,6 +327,20 @@ Shader "Lzebul/VRChat/Outline Only"
             return output;
         }
 
+        outline_v2f OutlineVertChromaticPositive(outline_appdata input)
+        {
+            outline_v2f output = OutlineVert(input);
+            output.pos = ApplyChromaticOffset(output.pos, 1.0);
+            return output;
+        }
+
+        outline_v2f OutlineVertChromaticNegative(outline_appdata input)
+        {
+            outline_v2f output = OutlineVert(input);
+            output.pos = ApplyChromaticOffset(output.pos, -1.0);
+            return output;
+        }
+
         void ClipOutlineVisibility(outline_v2f input)
         {
             clip(_UseMeshOutline - 0.5);
@@ -304,6 +370,25 @@ Shader "Lzebul/VRChat/Outline Only"
         {
             ClipOutlineVisibility(input);
             return GetOutlineBaseColor(input.uv);
+        }
+
+        float4 OutlineChromaticFrag(outline_v2f input, float3 chromaticColor)
+        {
+            ClipChromaticAberration();
+            ClipOutlineVisibility(input);
+
+            float alpha = saturate(GetOutlineBaseColor(input.uv).a * _FutureChromaticAberrationStrength);
+            return float4(chromaticColor, alpha);
+        }
+
+        float4 OutlineChromaticRedFrag(outline_v2f input) : SV_Target
+        {
+            return OutlineChromaticFrag(input, float3(1.0, 0.0, 0.0));
+        }
+
+        float4 OutlineChromaticCyanFrag(outline_v2f input) : SV_Target
+        {
+            return OutlineChromaticFrag(input, float3(0.0, 0.85, 1.0));
         }
         ENDCG
 
@@ -342,6 +427,40 @@ Shader "Lzebul/VRChat/Outline Only"
 
         Pass
         {
+            Name "SURFACE_LINES_CHROMATIC_RED"
+            Cull Back
+            ZWrite Off
+            ZTest LEqual
+            Offset -1, -1
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            CGPROGRAM
+            #pragma vertex BasicVertChromaticPositive
+            #pragma fragment SurfaceLineChromaticRedFrag
+            #pragma target 3.0
+            #pragma multi_compile_instancing
+            ENDCG
+        }
+
+        Pass
+        {
+            Name "SURFACE_LINES_CHROMATIC_CYAN"
+            Cull Back
+            ZWrite Off
+            ZTest LEqual
+            Offset -1, -1
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            CGPROGRAM
+            #pragma vertex BasicVertChromaticNegative
+            #pragma fragment SurfaceLineChromaticCyanFrag
+            #pragma target 3.0
+            #pragma multi_compile_instancing
+            ENDCG
+        }
+
+        Pass
+        {
             Name "OUTLINE_ONLY"
             Cull [_OutlineCull]
             ZWrite Off
@@ -352,6 +471,40 @@ Shader "Lzebul/VRChat/Outline Only"
             CGPROGRAM
             #pragma vertex OutlineVert
             #pragma fragment OutlineFrag
+            #pragma target 3.0
+            #pragma multi_compile_instancing
+            ENDCG
+        }
+
+        Pass
+        {
+            Name "OUTLINE_CHROMATIC_RED"
+            Cull [_OutlineCull]
+            ZWrite Off
+            ZTest LEqual
+            Offset [_OutlineOffsetFactor], [_OutlineOffsetUnits]
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            CGPROGRAM
+            #pragma vertex OutlineVertChromaticPositive
+            #pragma fragment OutlineChromaticRedFrag
+            #pragma target 3.0
+            #pragma multi_compile_instancing
+            ENDCG
+        }
+
+        Pass
+        {
+            Name "OUTLINE_CHROMATIC_CYAN"
+            Cull [_OutlineCull]
+            ZWrite Off
+            ZTest LEqual
+            Offset [_OutlineOffsetFactor], [_OutlineOffsetUnits]
+            Blend SrcAlpha OneMinusSrcAlpha
+
+            CGPROGRAM
+            #pragma vertex OutlineVertChromaticNegative
+            #pragma fragment OutlineChromaticCyanFrag
             #pragma target 3.0
             #pragma multi_compile_instancing
             ENDCG

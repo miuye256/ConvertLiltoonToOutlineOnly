@@ -89,8 +89,12 @@ namespace LzebulOutlineOnly
         internal const string ParamColorR = ExpressionPrefix + "ColorR";
         internal const string ParamColorG = ExpressionPrefix + "ColorG";
         internal const string ParamColorB = ExpressionPrefix + "ColorB";
+        internal const string ParamChromaticAberration = ExpressionPrefix + "ChromaticAberration";
+        internal const string ParamChromaticAberrationStrength = ExpressionPrefix + "ChromaticAberrationStrength";
         internal const string ExpressionLayerPrefix = "LOO Color ";
+        internal const string EffectLayerPrefix = "LOO Effect ";
         internal const float DefaultOutlineWidth = 0.08f;
+        internal const float DefaultChromaticAberrationStrength = 0.35f;
         internal const float HairOutlineOffsetFactor = -1f;
         internal const float HairOutlineOffsetUnits = -1f;
     }
@@ -537,6 +541,7 @@ namespace LzebulOutlineOnly
     {
         private const string RootMenuAssetName = "RootMenu.asset";
         private const string ColorMenuAssetName = "OutlineColorMenu.asset";
+        private const string ChromaticMenuAssetName = "ChromaticAberrationMenu.asset";
         private const string ParametersAssetName = "ExpressionParameters.asset";
         private const string FxControllerAssetName = "OutlineFX.controller";
 
@@ -567,7 +572,8 @@ namespace LzebulOutlineOnly
 
             var expressionParameters = CreateExpressionParameters($"{assetFolder}/{ParametersAssetName}");
             var colorMenu = CreateColorMenu($"{assetFolder}/{ColorMenuAssetName}");
-            var rootMenu = CreateRootMenu(colorMenu, $"{assetFolder}/{RootMenuAssetName}");
+            var chromaticMenu = CreateChromaticMenu($"{assetFolder}/{ChromaticMenuAssetName}");
+            var rootMenu = CreateRootMenu(colorMenu, chromaticMenu, $"{assetFolder}/{RootMenuAssetName}");
             var fxController = CreateFxController(colorBindings, assetFolder);
 
             avatar.customExpressions = true;
@@ -624,12 +630,12 @@ namespace LzebulOutlineOnly
             var parameters = ScriptableObject.CreateInstance<VRCExpressionParameters>();
             parameters.name = "Lzebul Outline Parameters";
             parameters.parameters = Array.Empty<VRCExpressionParameters.Parameter>();
-            UpsertColorParameters(parameters, true);
+            UpsertGeneratedParameters(parameters, true);
 
             if (parameters.CalcTotalCost() > VRCExpressionParameters.MAX_PARAMETER_COST)
             {
-                UpsertColorParameters(parameters, false);
-                Debug.LogWarning("Lzebul Outline: ExpressionParametersの同期容量を超えるため、アウトライン色パラメータは非同期で追加しました。自分の画面では変更できますが、他ユーザーには同期されません。");
+                UpsertGeneratedParameters(parameters, false);
+                Debug.LogWarning("Lzebul Outline: ExpressionParametersの同期容量を超えるため、アウトライン操作パラメータは非同期で追加しました。自分の画面では変更できますが、他ユーザーには同期されません。");
             }
 
             AssetDatabase.CreateAsset(parameters, assetPath);
@@ -637,7 +643,7 @@ namespace LzebulOutlineOnly
             return parameters;
         }
 
-        private static void UpsertColorParameters(VRCExpressionParameters parameters, bool networkSynced)
+        private static void UpsertGeneratedParameters(VRCExpressionParameters parameters, bool networkSynced)
         {
             var list = new List<VRCExpressionParameters.Parameter>();
             if (parameters.parameters != null)
@@ -645,7 +651,7 @@ namespace LzebulOutlineOnly
                 for (var index = 0; index < parameters.parameters.Length; index++)
                 {
                     var parameter = parameters.parameters[index];
-                    if (parameter != null && !IsOutlineColorParameter(parameter.name))
+                    if (parameter != null && !IsGeneratedExpressionParameter(parameter.name))
                     {
                         list.Add(parameter);
                     }
@@ -663,6 +669,24 @@ namespace LzebulOutlineOnly
                     networkSynced = networkSynced
                 });
             }
+
+            list.Add(new VRCExpressionParameters.Parameter
+            {
+                name = OutlineOnlyConstants.ParamChromaticAberration,
+                valueType = VRCExpressionParameters.ValueType.Bool,
+                defaultValue = 0f,
+                saved = true,
+                networkSynced = networkSynced
+            });
+
+            list.Add(new VRCExpressionParameters.Parameter
+            {
+                name = OutlineOnlyConstants.ParamChromaticAberrationStrength,
+                valueType = VRCExpressionParameters.ValueType.Float,
+                defaultValue = OutlineOnlyConstants.DefaultChromaticAberrationStrength,
+                saved = true,
+                networkSynced = networkSynced
+            });
 
             parameters.parameters = list.ToArray();
         }
@@ -698,7 +722,45 @@ namespace LzebulOutlineOnly
             return menu;
         }
 
-        private static VRCExpressionsMenu CreateRootMenu(VRCExpressionsMenu colorMenu, string assetPath)
+        private static VRCExpressionsMenu CreateChromaticMenu(string assetPath)
+        {
+            var menu = CreateAsset<VRCExpressionsMenu>(assetPath, "Lzebul Outline Chromatic Aberration Menu");
+            ResetMenuControls(menu);
+
+            menu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "ON/OFF",
+                type = VRCExpressionsMenu.Control.ControlType.Toggle,
+                parameter = new VRCExpressionsMenu.Control.Parameter
+                {
+                    name = OutlineOnlyConstants.ParamChromaticAberration
+                },
+                value = 1f
+            });
+
+            menu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "強度",
+                type = VRCExpressionsMenu.Control.ControlType.RadialPuppet,
+                parameter = new VRCExpressionsMenu.Control.Parameter
+                {
+                    name = string.Empty
+                },
+                value = OutlineOnlyConstants.DefaultChromaticAberrationStrength,
+                subParameters = new[]
+                {
+                    new VRCExpressionsMenu.Control.Parameter
+                    {
+                        name = OutlineOnlyConstants.ParamChromaticAberrationStrength
+                    }
+                }
+            });
+
+            SaveMenuAsset(menu);
+            return menu;
+        }
+
+        private static VRCExpressionsMenu CreateRootMenu(VRCExpressionsMenu colorMenu, VRCExpressionsMenu chromaticMenu, string assetPath)
         {
             var menu = CreateAsset<VRCExpressionsMenu>(assetPath, "Lzebul Outline Root Menu");
             ResetMenuControls(menu);
@@ -713,6 +775,18 @@ namespace LzebulOutlineOnly
                 },
                 value = 1f,
                 subMenu = colorMenu
+            });
+
+            menu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "色収差",
+                type = VRCExpressionsMenu.Control.ControlType.SubMenu,
+                parameter = new VRCExpressionsMenu.Control.Parameter
+                {
+                    name = string.Empty
+                },
+                value = 1f,
+                subMenu = chromaticMenu
             });
 
             SaveMenuAsset(menu);
@@ -752,6 +826,38 @@ namespace LzebulOutlineOnly
                 AddColorLayer(controller, channel, clip);
             }
 
+            var chromaticOffClip = CreateFloatClip(
+                colorBindings,
+                "Lzebul Outline Chromatic Aberration Off",
+                "_UseFutureChromaticAberration",
+                0f,
+                $"{assetFolder}/ChromaticAberration_Off.anim");
+            var chromaticOnClip = CreateFloatClip(
+                colorBindings,
+                "Lzebul Outline Chromatic Aberration On",
+                "_UseFutureChromaticAberration",
+                1f,
+                $"{assetFolder}/ChromaticAberration_On.anim");
+            AddBoolToggleLayer(
+                controller,
+                OutlineOnlyConstants.EffectLayerPrefix + "Chromatic Aberration",
+                OutlineOnlyConstants.ParamChromaticAberration,
+                chromaticOffClip,
+                chromaticOnClip);
+
+            var chromaticStrengthClip = CreateFloatRangeClip(
+                colorBindings,
+                "Lzebul Outline Chromatic Aberration Strength",
+                "_FutureChromaticAberrationStrength",
+                0f,
+                1f,
+                $"{assetFolder}/ChromaticAberration_Strength.anim");
+            AddTimeParameterLayer(
+                controller,
+                OutlineOnlyConstants.EffectLayerPrefix + "Chromatic Aberration Strength",
+                OutlineOnlyConstants.ParamChromaticAberrationStrength,
+                chromaticStrengthClip);
+
             EditorUtility.SetDirty(controller);
             return controller;
         }
@@ -767,6 +873,20 @@ namespace LzebulOutlineOnly
                     defaultFloat = 0f
                 });
             }
+
+            controller.AddParameter(new AnimatorControllerParameter
+            {
+                name = OutlineOnlyConstants.ParamChromaticAberration,
+                type = AnimatorControllerParameterType.Bool,
+                defaultBool = false
+            });
+
+            controller.AddParameter(new AnimatorControllerParameter
+            {
+                name = OutlineOnlyConstants.ParamChromaticAberrationStrength,
+                type = AnimatorControllerParameterType.Float,
+                defaultFloat = OutlineOnlyConstants.DefaultChromaticAberrationStrength
+            });
         }
 
         private static AnimationClip CreateColorClip(List<RendererColorBinding> colorBindings, ColorChannel channel, string assetPath)
@@ -808,11 +928,55 @@ namespace LzebulOutlineOnly
                 curve);
         }
 
+        private static AnimationClip CreateFloatClip(List<RendererColorBinding> colorBindings, string clipName, string propertyName, float value, string assetPath)
+        {
+            return CreateFloatRangeClip(colorBindings, clipName, propertyName, value, value, assetPath);
+        }
+
+        private static AnimationClip CreateFloatRangeClip(List<RendererColorBinding> colorBindings, string clipName, string propertyName, float startValue, float endValue, string assetPath)
+        {
+            OutlineOnlyAssetPaths.DeleteAssetIfExists(assetPath);
+
+            var clip = new AnimationClip
+            {
+                name = clipName,
+                wrapMode = WrapMode.ClampForever
+            };
+
+            var curve = AnimationCurve.Linear(0f, startValue, 1f, endValue);
+            for (var index = 0; index < colorBindings.Count; index++)
+            {
+                SetMaterialFloatCurve(clip, colorBindings[index], propertyName, curve);
+            }
+
+            AssetDatabase.CreateAsset(clip, assetPath);
+            EditorUtility.SetDirty(clip);
+            return clip;
+        }
+
+        private static void SetMaterialFloatCurve(AnimationClip clip, RendererColorBinding target, string propertyName, AnimationCurve curve)
+        {
+            AnimationUtility.SetEditorCurve(
+                clip,
+                new EditorCurveBinding
+                {
+                    path = target.Path,
+                    type = target.RendererType,
+                    propertyName = $"material.{propertyName}"
+                },
+                curve);
+        }
+
         private static void AddColorLayer(AnimatorController controller, ColorChannel channel, AnimationClip clip)
+        {
+            AddTimeParameterLayer(controller, OutlineOnlyConstants.ExpressionLayerPrefix + channel.DisplayName, channel.ParameterName, clip);
+        }
+
+        private static void AddTimeParameterLayer(AnimatorController controller, string layerName, string timeParameterName, AnimationClip clip)
         {
             var stateMachine = new AnimatorStateMachine
             {
-                name = OutlineOnlyConstants.ExpressionLayerPrefix + channel.DisplayName
+                name = layerName
             };
             AssetDatabase.AddObjectToAsset(stateMachine, controller);
 
@@ -821,16 +985,59 @@ namespace LzebulOutlineOnly
             state.writeDefaultValues = false;
             state.speed = 0f;
             state.timeParameterActive = true;
-            state.timeParameter = channel.ParameterName;
+            state.timeParameter = timeParameterName;
             stateMachine.defaultState = state;
 
             controller.AddLayer(new AnimatorControllerLayer
             {
-                name = OutlineOnlyConstants.ExpressionLayerPrefix + channel.DisplayName,
+                name = layerName,
                 defaultWeight = 1f,
                 blendingMode = AnimatorLayerBlendingMode.Override,
                 stateMachine = stateMachine
             });
+        }
+
+        private static void AddBoolToggleLayer(AnimatorController controller, string layerName, string parameterName, AnimationClip offClip, AnimationClip onClip)
+        {
+            var stateMachine = new AnimatorStateMachine
+            {
+                name = layerName
+            };
+            AssetDatabase.AddObjectToAsset(stateMachine, controller);
+
+            var offState = stateMachine.AddState("OFF");
+            offState.motion = offClip;
+            offState.writeDefaultValues = false;
+
+            var onState = stateMachine.AddState("ON");
+            onState.motion = onClip;
+            onState.writeDefaultValues = false;
+
+            var toOn = offState.AddTransition(onState);
+            ConfigureInstantTransition(toOn);
+            toOn.AddCondition(AnimatorConditionMode.If, 0f, parameterName);
+
+            var toOff = onState.AddTransition(offState);
+            ConfigureInstantTransition(toOff);
+            toOff.AddCondition(AnimatorConditionMode.IfNot, 0f, parameterName);
+
+            stateMachine.defaultState = offState;
+
+            controller.AddLayer(new AnimatorControllerLayer
+            {
+                name = layerName,
+                defaultWeight = 1f,
+                blendingMode = AnimatorLayerBlendingMode.Override,
+                stateMachine = stateMachine
+            });
+        }
+
+        private static void ConfigureInstantTransition(AnimatorStateTransition transition)
+        {
+            transition.hasExitTime = false;
+            transition.hasFixedDuration = true;
+            transition.duration = 0f;
+            transition.exitTime = 0f;
         }
 
         private static void AssignFxController(VRCAvatarDescriptor avatar, RuntimeAnimatorController controller)
@@ -881,11 +1088,13 @@ namespace LzebulOutlineOnly
             return asset;
         }
 
-        private static bool IsOutlineColorParameter(string parameterName)
+        private static bool IsGeneratedExpressionParameter(string parameterName)
         {
             return parameterName == OutlineOnlyConstants.ParamColorR
                    || parameterName == OutlineOnlyConstants.ParamColorG
-                   || parameterName == OutlineOnlyConstants.ParamColorB;
+                   || parameterName == OutlineOnlyConstants.ParamColorB
+                   || parameterName == OutlineOnlyConstants.ParamChromaticAberration
+                   || parameterName == OutlineOnlyConstants.ParamChromaticAberrationStrength;
         }
 
         private readonly struct RendererColorBinding
