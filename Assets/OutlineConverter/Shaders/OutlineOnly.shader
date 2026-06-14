@@ -1,4 +1,4 @@
-Shader "Lzebul/VRChat/Outline Only"
+Shader "OutlineConverter/Outline Only"
 {
     Properties
     {
@@ -513,5 +513,5 @@ Shader "Lzebul/VRChat/Outline Only"
     }
 
     Fallback "Unlit/Transparent"
-    CustomEditor "LzebulOutlineOnly.OutlineOnlyShaderGUI"
+    CustomEditor "OutlineConverter.OutlineShaderGUI"
 }

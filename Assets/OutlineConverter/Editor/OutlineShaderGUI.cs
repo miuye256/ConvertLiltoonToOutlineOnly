@@ -1,9 +1,9 @@
 using UnityEditor;
 using UnityEngine;
 
-namespace LzebulOutlineOnly
+namespace OutlineConverter
 {
-    public sealed class OutlineOnlyShaderGUI : ShaderGUI
+    public sealed class OutlineShaderGUI : ShaderGUI
     {
         public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
         {

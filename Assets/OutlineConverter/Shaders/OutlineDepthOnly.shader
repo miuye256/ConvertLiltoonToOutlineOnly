@@ -1,4 +1,4 @@
-Shader "Lzebul/VRChat/Outline Depth Only"
+Shader "OutlineConverter/Outline Depth Only"
 {
     Properties
     {

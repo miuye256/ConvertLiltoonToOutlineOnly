@@ -1,14 +1,14 @@
-# Track only the Lzebul Outline Only editor scripts and shaders.
+# Track only the OutlineConverter editor scripts and shaders.
 *
 
 !.gitignore
 
 !Assets/
-!Assets/LzebulOutlineOnly.meta
-!Assets/LzebulOutlineOnly/
-!Assets/LzebulOutlineOnly/Editor.meta
-!Assets/LzebulOutlineOnly/Editor/
-!Assets/LzebulOutlineOnly/Editor/**
-!Assets/LzebulOutlineOnly/Shaders.meta
-!Assets/LzebulOutlineOnly/Shaders/
-!Assets/LzebulOutlineOnly/Shaders/**
+!Assets/OutlineConverter.meta
+!Assets/OutlineConverter/
+!Assets/OutlineConverter/Editor.meta
+!Assets/OutlineConverter/Editor/
+!Assets/OutlineConverter/Editor/**
+!Assets/OutlineConverter/Shaders.meta
+!Assets/OutlineConverter/Shaders/
+!Assets/OutlineConverter/Shaders/**

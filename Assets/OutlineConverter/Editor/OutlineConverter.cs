@@ -8,11 +8,11 @@ using UnityEngine.Rendering;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 
-namespace LzebulOutlineOnly
+namespace OutlineConverter
 {
-    public static class OutlineOnlyConverter
+    public static class OutlineConverterMenu
     {
-        private const string ContextMenuPath = "GameObject/Lzebul Outline/アウトライン用Prefabを作成";
+        private const string ContextMenuPath = "GameObject/OutlineConverter/アウトライン用Prefabを作成";
 
         [MenuItem(ContextMenuPath, false, 49)]
         private static void CreateOutlineOnlyPrefab(MenuCommand command)
@@ -20,27 +20,27 @@ namespace LzebulOutlineOnly
             var source = ResolveContextGameObject(command);
             if (source == null)
             {
-                EditorUtility.DisplayDialog("Lzebul Outline", "Hierarchy上の変換対象GameObjectを右クリックして実行してください。", "OK");
+                EditorUtility.DisplayDialog("OutlineConverter", "Hierarchy上の変換対象GameObjectを右クリックして実行してください。", "OK");
                 return;
             }
 
             if (source.GetComponentsInChildren<Renderer>(true).Length == 0)
             {
-                EditorUtility.DisplayDialog("Lzebul Outline", "選択したGameObjectにはRendererがありません。", "OK");
+                EditorUtility.DisplayDialog("OutlineConverter", "選択したGameObjectにはRendererがありません。", "OK");
                 return;
             }
 
             var outlineShader = Shader.Find(OutlineOnlyConstants.OutlineShaderName);
             if (outlineShader == null)
             {
-                EditorUtility.DisplayDialog("Lzebul Outline", $"Shader.Find(\"{OutlineOnlyConstants.OutlineShaderName}\") に失敗しました。Shadersフォルダを再インポートしてください。", "OK");
+                EditorUtility.DisplayDialog("OutlineConverter", $"Shader.Find(\"{OutlineOnlyConstants.OutlineShaderName}\") に失敗しました。Shadersフォルダを再インポートしてください。", "OK");
                 return;
             }
 
             var depthShader = Shader.Find(OutlineOnlyConstants.DepthShaderName);
             if (depthShader == null)
             {
-                EditorUtility.DisplayDialog("Lzebul Outline", $"Shader.Find(\"{OutlineOnlyConstants.DepthShaderName}\") に失敗しました。Shadersフォルダを再インポートしてください。", "OK");
+                EditorUtility.DisplayDialog("OutlineConverter", $"Shader.Find(\"{OutlineOnlyConstants.DepthShaderName}\") に失敗しました。Shadersフォルダを再インポートしてください。", "OK");
                 return;
             }
 
@@ -53,14 +53,14 @@ namespace LzebulOutlineOnly
                 Selection.activeObject = result.Prefab;
                 EditorGUIUtility.PingObject(result.Prefab);
                 EditorUtility.DisplayDialog(
-                    "Lzebul Outline",
+                    "OutlineConverter",
                     $"アウトライン用Prefabを作成しました。\n\n{prefabPath}\n\n変換Renderer: {result.RendererCount}\n生成Material: {result.MaterialCount}\nDepth Proxy: {result.DepthProxyCount}\nExpressionMenu: {(result.ExpressionInstalled ? "追加済み" : "未追加")}",
                     "OK");
             }
             catch (Exception exception)
             {
                 Debug.LogException(exception);
-                EditorUtility.DisplayDialog("Lzebul Outline", "アウトライン用Prefabの作成中にエラーが発生しました。Consoleを確認してください。", "OK");
+                EditorUtility.DisplayDialog("OutlineConverter", "アウトライン用Prefabの作成中にエラーが発生しました。Consoleを確認してください。", "OK");
             }
         }
 
@@ -78,22 +78,25 @@ namespace LzebulOutlineOnly
 
     internal static class OutlineOnlyConstants
     {
-        internal const string OutlineShaderName = "Lzebul/VRChat/Outline Only";
-        internal const string DepthShaderName = "Lzebul/VRChat/Outline Depth Only";
-        internal const string OutputRoot = "Assets/LzebulOutlineOnly/Generated";
+        internal const string OutlineShaderName = "OutlineConverter/Outline Only";
+        internal const string DepthShaderName = "OutlineConverter/Outline Depth Only";
+        internal const string OutputRoot = "Assets/OutlineConverter/Generated";
         internal const string MaterialsFolder = OutputRoot + "/Materials";
         internal const string DepthMaterialsFolder = OutputRoot + "/DepthMaterials";
         internal const string ExpressionsFolder = OutputRoot + "/Expressions";
         internal const string DepthProxyPrefix = "__OutlineDepthProxy_";
-        internal const string ExpressionPrefix = "LOO_";
+        internal const string ExpressionPrefix = "OC_";
+        internal const string LegacyExpressionPrefix = "LOO_";
         internal const string ParamColorR = ExpressionPrefix + "ColorR";
         internal const string ParamColorG = ExpressionPrefix + "ColorG";
         internal const string ParamColorB = ExpressionPrefix + "ColorB";
         internal const string ParamOutlineWidth = ExpressionPrefix + "OutlineWidth";
         internal const string ParamChromaticAberration = ExpressionPrefix + "ChromaticAberration";
         internal const string ParamChromaticAberrationStrength = ExpressionPrefix + "ChromaticAberrationStrength";
-        internal const string ExpressionLayerPrefix = "LOO Color ";
-        internal const string EffectLayerPrefix = "LOO Effect ";
+        internal const string ExpressionLayerPrefix = "OC Color ";
+        internal const string EffectLayerPrefix = "OC Effect ";
+        internal const string LegacyExpressionLayerPrefix = "LOO Color ";
+        internal const string LegacyEffectLayerPrefix = "LOO Effect ";
         internal const float DefaultOutlineWidth = 0.08f;
         internal const float MaxExpressionOutlineWidth = 1f;
         internal const float DefaultChromaticAberrationStrength = 0.35f;
@@ -568,7 +571,7 @@ namespace LzebulOutlineOnly
             var colorBindings = CollectColorBindings(root);
             if (colorBindings.Count == 0)
             {
-                Debug.LogWarning("Lzebul Outline: ExpressionMenu用の色変更対象Rendererが見つからなかったため、Expression追加をスキップしました。");
+                Debug.LogWarning("OutlineConverter: ExpressionMenu用の色変更対象Rendererが見つからなかったため、Expression追加をスキップしました。");
                 return false;
             }
 
@@ -640,7 +643,7 @@ namespace LzebulOutlineOnly
             var parameters = sourceParameters == null
                 ? ScriptableObject.CreateInstance<VRCExpressionParameters>()
                 : UnityEngine.Object.Instantiate(sourceParameters);
-            parameters.name = "Lzebul Outline Parameters";
+            parameters.name = "OutlineConverter Parameters";
             parameters.hideFlags = HideFlags.None;
             if (parameters.parameters == null)
             {
@@ -652,7 +655,7 @@ namespace LzebulOutlineOnly
             if (parameters.CalcTotalCost() > VRCExpressionParameters.MAX_PARAMETER_COST)
             {
                 UpsertGeneratedParameters(parameters, false);
-                Debug.LogWarning("Lzebul Outline: ExpressionParametersの同期容量を超えるため、アウトライン操作パラメータは非同期で追加しました。自分の画面では変更できますが、他ユーザーには同期されません。");
+                Debug.LogWarning("OutlineConverter: ExpressionParametersの同期容量を超えるため、アウトライン操作パラメータは非同期で追加しました。自分の画面では変更できますが、他ユーザーには同期されません。");
             }
 
             AssetDatabase.CreateAsset(parameters, assetPath);
@@ -724,7 +727,7 @@ namespace LzebulOutlineOnly
 
         private static VRCExpressionsMenu CreateColorMenu(string assetPath)
         {
-            var menu = CreateMenuAsset(assetPath, "Lzebul Outline Color Menu");
+            var menu = CreateMenuAsset(assetPath, "OutlineConverter Color Menu");
             ResetMenuControls(menu);
 
             for (var index = 0; index < ColorChannels.Length; index++)
@@ -755,7 +758,7 @@ namespace LzebulOutlineOnly
 
         private static VRCExpressionsMenu CreateChromaticMenu(string assetPath)
         {
-            var menu = CreateMenuAsset(assetPath, "Lzebul Outline Chromatic Aberration Menu");
+            var menu = CreateMenuAsset(assetPath, "OutlineConverter Chromatic Aberration Menu");
             ResetMenuControls(menu);
 
             menu.controls.Add(new VRCExpressionsMenu.Control
@@ -793,7 +796,7 @@ namespace LzebulOutlineOnly
 
         private static VRCExpressionsMenu CreateOutlineMenu(VRCExpressionsMenu colorMenu, VRCExpressionsMenu chromaticMenu, string assetPath)
         {
-            var menu = CreateMenuAsset(assetPath, "Lzebul Outline Menu");
+            var menu = CreateMenuAsset(assetPath, "OutlineConverter Menu");
             ResetMenuControls(menu);
 
             menu.controls.Add(new VRCExpressionsMenu.Control
@@ -833,8 +836,8 @@ namespace LzebulOutlineOnly
                 ? $"{assetFolder}/{RootMenuAssetName}"
                 : $"{assetFolder}/{OriginalMenuAssetName}";
             var copiedSourceMenuName = sourceControlCount < MaxMenuControls
-                ? "Lzebul Outline Root Menu"
-                : "Lzebul Original Menu";
+                ? "OutlineConverter Root Menu"
+                : "OutlineConverter Original Menu";
             var copiedSourceMenu = CreateMenuAsset(copiedSourceMenuPath, copiedSourceMenuName, sourceMenu);
             EnsureMenuControls(copiedSourceMenu);
 
@@ -845,7 +848,7 @@ namespace LzebulOutlineOnly
                 return copiedSourceMenu;
             }
 
-            var rootMenu = CreateMenuAsset($"{assetFolder}/{RootMenuAssetName}", "Lzebul Outline Root Menu");
+            var rootMenu = CreateMenuAsset($"{assetFolder}/{RootMenuAssetName}", "OutlineConverter Root Menu");
             ResetMenuControls(rootMenu);
             AddSubMenuControl(rootMenu, "元メニュー", copiedSourceMenu);
             AddSubMenuControl(rootMenu, "アウトライン", outlineMenu);
@@ -913,7 +916,7 @@ namespace LzebulOutlineOnly
 
             var outlineWidthClip = CreateFloatRangeClip(
                 colorBindings,
-                "Lzebul Outline Width",
+                "OutlineConverter Width",
                 "_OutlineWidth",
                 0f,
                 OutlineOnlyConstants.MaxExpressionOutlineWidth,
@@ -933,13 +936,13 @@ namespace LzebulOutlineOnly
 
             var chromaticOffClip = CreateFloatClip(
                 colorBindings,
-                "Lzebul Outline Chromatic Aberration Off",
+                "OutlineConverter Chromatic Aberration Off",
                 "_UseFutureChromaticAberration",
                 0f,
                 $"{assetFolder}/ChromaticAberration_Off.anim");
             var chromaticOnClip = CreateFloatClip(
                 colorBindings,
-                "Lzebul Outline Chromatic Aberration On",
+                "OutlineConverter Chromatic Aberration On",
                 "_UseFutureChromaticAberration",
                 1f,
                 $"{assetFolder}/ChromaticAberration_On.anim");
@@ -952,7 +955,7 @@ namespace LzebulOutlineOnly
 
             var chromaticStrengthClip = CreateFloatRangeClip(
                 colorBindings,
-                "Lzebul Outline Chromatic Aberration Strength",
+                "OutlineConverter Chromatic Aberration Strength",
                 "_FutureChromaticAberrationStrength",
                 0f,
                 1f,
@@ -980,16 +983,16 @@ namespace LzebulOutlineOnly
                     var copiedController = AssetDatabase.LoadAssetAtPath<AnimatorController>(controllerPath);
                     if (copiedController != null)
                     {
-                        copiedController.name = "Lzebul Outline FX";
+                        copiedController.name = "OutlineConverter FX";
                         return copiedController;
                     }
                 }
 
-                Debug.LogWarning("Lzebul Outline: Source FX controller could not be copied. A new outline-only FX controller will be generated.");
+                Debug.LogWarning("OutlineConverter: Source FX controller could not be copied. A new outline-only FX controller will be generated.");
             }
             else if (sourceFxController != null)
             {
-                Debug.LogWarning("Lzebul Outline: Source FX controller is not an AnimatorController. A new outline-only FX controller will be generated.");
+                Debug.LogWarning("OutlineConverter: Source FX controller is not an AnimatorController. A new outline-only FX controller will be generated.");
             }
 
             return AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
@@ -1015,7 +1018,9 @@ namespace LzebulOutlineOnly
         {
             return layerName != null
                    && (layerName.StartsWith(OutlineOnlyConstants.ExpressionLayerPrefix, StringComparison.Ordinal)
-                       || layerName.StartsWith(OutlineOnlyConstants.EffectLayerPrefix, StringComparison.Ordinal));
+                       || layerName.StartsWith(OutlineOnlyConstants.EffectLayerPrefix, StringComparison.Ordinal)
+                       || layerName.StartsWith(OutlineOnlyConstants.LegacyExpressionLayerPrefix, StringComparison.Ordinal)
+                       || layerName.StartsWith(OutlineOnlyConstants.LegacyEffectLayerPrefix, StringComparison.Ordinal));
         }
 
         private static void WarnIfControllerAnimatesMaterialProperties(AnimatorController controller)
@@ -1051,7 +1056,7 @@ namespace LzebulOutlineOnly
                 samples[index] = materialBindings[index];
             }
 
-            Debug.LogWarning("Lzebul Outline: Source FX animates material bindings that may conflict with outline materials: " + string.Join(", ", samples));
+            Debug.LogWarning("OutlineConverter: Source FX animates material bindings that may conflict with outline materials: " + string.Join(", ", samples));
         }
 
         private static void AppendMaterialBindingWarnings(AnimationClip clip, List<string> materialBindings)
@@ -1092,6 +1097,12 @@ namespace LzebulOutlineOnly
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamOutlineWidth);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamChromaticAberration);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamChromaticAberrationStrength);
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("ColorR"));
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("ColorG"));
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("ColorB"));
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("OutlineWidth"));
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("ChromaticAberration"));
+            RemoveAnimatorParameterIfExists(controller, GetLegacyParameterName("ChromaticAberrationStrength"));
 
             for (var index = 0; index < ColorChannels.Length; index++)
             {
@@ -1149,13 +1160,18 @@ namespace LzebulOutlineOnly
             }
         }
 
+        private static string GetLegacyParameterName(string parameterName)
+        {
+            return OutlineOnlyConstants.LegacyExpressionPrefix + parameterName;
+        }
+
         private static AnimationClip CreateColorClip(List<RendererColorBinding> colorBindings, ColorChannel channel, string assetPath)
         {
             OutlineOnlyAssetPaths.DeleteAssetIfExists(assetPath);
 
             var clip = new AnimationClip
             {
-                name = $"Lzebul Outline Color {channel.DisplayName}",
+                name = $"OutlineConverter Color {channel.DisplayName}",
                 wrapMode = WrapMode.ClampForever
             };
 
@@ -1305,7 +1321,7 @@ namespace LzebulOutlineOnly
             var index = GetFxLayerIndex(avatar);
             if (index < 0)
             {
-                Debug.LogWarning("Lzebul Outline: FX Layerが見つからないため、アウトライン色のAnimatorを設定できませんでした。");
+                Debug.LogWarning("OutlineConverter: FX Layerが見つからないため、アウトライン色のAnimatorを設定できませんでした。");
                 return;
             }
 
@@ -1361,6 +1377,16 @@ namespace LzebulOutlineOnly
 
         private static bool IsGeneratedExpressionParameter(string parameterName)
         {
+            if (parameterName != null && parameterName.StartsWith(OutlineOnlyConstants.LegacyExpressionPrefix, StringComparison.Ordinal))
+            {
+                return parameterName == GetLegacyParameterName("ColorR")
+                       || parameterName == GetLegacyParameterName("ColorG")
+                       || parameterName == GetLegacyParameterName("ColorB")
+                       || parameterName == GetLegacyParameterName("OutlineWidth")
+                       || parameterName == GetLegacyParameterName("ChromaticAberration")
+                       || parameterName == GetLegacyParameterName("ChromaticAberrationStrength");
+            }
+
             return parameterName == OutlineOnlyConstants.ParamColorR
                    || parameterName == OutlineOnlyConstants.ParamColorG
                    || parameterName == OutlineOnlyConstants.ParamColorB
