@@ -89,11 +89,13 @@ namespace LzebulOutlineOnly
         internal const string ParamColorR = ExpressionPrefix + "ColorR";
         internal const string ParamColorG = ExpressionPrefix + "ColorG";
         internal const string ParamColorB = ExpressionPrefix + "ColorB";
+        internal const string ParamOutlineWidth = ExpressionPrefix + "OutlineWidth";
         internal const string ParamChromaticAberration = ExpressionPrefix + "ChromaticAberration";
         internal const string ParamChromaticAberrationStrength = ExpressionPrefix + "ChromaticAberrationStrength";
         internal const string ExpressionLayerPrefix = "LOO Color ";
         internal const string EffectLayerPrefix = "LOO Effect ";
         internal const float DefaultOutlineWidth = 0.08f;
+        internal const float MaxExpressionOutlineWidth = 1f;
         internal const float DefaultChromaticAberrationStrength = 0.35f;
         internal const float HairOutlineOffsetFactor = -1f;
         internal const float HairOutlineOffsetUnits = -1f;
@@ -687,6 +689,15 @@ namespace LzebulOutlineOnly
 
             list.Add(new VRCExpressionParameters.Parameter
             {
+                name = OutlineOnlyConstants.ParamOutlineWidth,
+                valueType = VRCExpressionParameters.ValueType.Float,
+                defaultValue = GetDefaultOutlineWidthParameterValue(),
+                saved = true,
+                networkSynced = networkSynced
+            });
+
+            list.Add(new VRCExpressionParameters.Parameter
+            {
                 name = OutlineOnlyConstants.ParamChromaticAberration,
                 valueType = VRCExpressionParameters.ValueType.Bool,
                 defaultValue = 0f,
@@ -704,6 +715,11 @@ namespace LzebulOutlineOnly
             });
 
             parameters.parameters = list.ToArray();
+        }
+
+        private static float GetDefaultOutlineWidthParameterValue()
+        {
+            return Mathf.Clamp01(OutlineOnlyConstants.DefaultOutlineWidth / OutlineOnlyConstants.MaxExpressionOutlineWidth);
         }
 
         private static VRCExpressionsMenu CreateColorMenu(string assetPath)
@@ -779,6 +795,24 @@ namespace LzebulOutlineOnly
         {
             var menu = CreateMenuAsset(assetPath, "Lzebul Outline Menu");
             ResetMenuControls(menu);
+
+            menu.controls.Add(new VRCExpressionsMenu.Control
+            {
+                name = "線幅",
+                type = VRCExpressionsMenu.Control.ControlType.RadialPuppet,
+                parameter = new VRCExpressionsMenu.Control.Parameter
+                {
+                    name = string.Empty
+                },
+                value = GetDefaultOutlineWidthParameterValue(),
+                subParameters = new[]
+                {
+                    new VRCExpressionsMenu.Control.Parameter
+                    {
+                        name = OutlineOnlyConstants.ParamOutlineWidth
+                    }
+                }
+            });
 
             AddSubMenuControl(menu, "アウトライン色", colorMenu);
             AddSubMenuControl(menu, "色収差", chromaticMenu);
@@ -876,6 +910,19 @@ namespace LzebulOutlineOnly
             RemoveGeneratedAnimatorLayers(controller);
             WarnIfControllerAnimatesMaterialProperties(controller);
             UpsertAnimatorParameters(controller);
+
+            var outlineWidthClip = CreateFloatRangeClip(
+                colorBindings,
+                "Lzebul Outline Width",
+                "_OutlineWidth",
+                0f,
+                OutlineOnlyConstants.MaxExpressionOutlineWidth,
+                $"{assetFolder}/OutlineWidth.anim");
+            AddTimeParameterLayer(
+                controller,
+                OutlineOnlyConstants.EffectLayerPrefix + "Outline Width",
+                OutlineOnlyConstants.ParamOutlineWidth,
+                outlineWidthClip);
 
             for (var index = 0; index < ColorChannels.Length; index++)
             {
@@ -1042,6 +1089,7 @@ namespace LzebulOutlineOnly
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamColorR);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamColorG);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamColorB);
+            RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamOutlineWidth);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamChromaticAberration);
             RemoveAnimatorParameterIfExists(controller, OutlineOnlyConstants.ParamChromaticAberrationStrength);
 
@@ -1054,6 +1102,13 @@ namespace LzebulOutlineOnly
                     defaultFloat = 0f
                 });
             }
+
+            controller.AddParameter(new AnimatorControllerParameter
+            {
+                name = OutlineOnlyConstants.ParamOutlineWidth,
+                type = AnimatorControllerParameterType.Float,
+                defaultFloat = GetDefaultOutlineWidthParameterValue()
+            });
 
             controller.AddParameter(new AnimatorControllerParameter
             {
@@ -1309,6 +1364,7 @@ namespace LzebulOutlineOnly
             return parameterName == OutlineOnlyConstants.ParamColorR
                    || parameterName == OutlineOnlyConstants.ParamColorG
                    || parameterName == OutlineOnlyConstants.ParamColorB
+                   || parameterName == OutlineOnlyConstants.ParamOutlineWidth
                    || parameterName == OutlineOnlyConstants.ParamChromaticAberration
                    || parameterName == OutlineOnlyConstants.ParamChromaticAberrationStrength;
         }
