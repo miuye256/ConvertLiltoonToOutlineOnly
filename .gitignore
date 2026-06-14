@@ -1,0 +1,14 @@
+# Track only the Lzebul Outline Only editor scripts and shaders.
+*
+
+!.gitignore
+
+!Assets/
+!Assets/LzebulOutlineOnly.meta
+!Assets/LzebulOutlineOnly/
+!Assets/LzebulOutlineOnly/Editor.meta
+!Assets/LzebulOutlineOnly/Editor/
+!Assets/LzebulOutlineOnly/Editor/**
+!Assets/LzebulOutlineOnly/Shaders.meta
+!Assets/LzebulOutlineOnly/Shaders/
+!Assets/LzebulOutlineOnly/Shaders/**
